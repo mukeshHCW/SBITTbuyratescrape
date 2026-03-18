@@ -114,9 +114,23 @@ def parse_pdf(pdf_bytes: bytes) -> dict:
         print("ERROR: No tables found in PDF", file=sys.stderr)
         sys.exit(2)
 
-    table = tables[0]
-    # Header row: ['CURRENCY', None, 'TT BUY', 'TT SELL', 'BILL BUY', ...]
-    headers = [str(h).strip() if h else "" for h in table[0]]
+    # Search across all tables and rows for the header row containing 'TT BUY'.
+    # SBI sometimes includes a title row (e.g., "CARD RATES FOR TRANSACTIONS...")
+    # as the first row, pushing the actual column headers to row 1 or into a
+    # different table entirely.
+    table = None
+    headers = []
+    header_row_idx = -1
+    for t in tables:
+        for idx, row in enumerate(t):
+            row_strs = [str(c).strip() if c else "" for c in row]
+            if any("TT BUY" in s for s in row_strs):
+                table = t
+                headers = row_strs
+                header_row_idx = idx
+                break
+        if table is not None:
+            break
 
     # Find column indices by header name
     def col_index(name: str) -> int:
@@ -128,13 +142,13 @@ def parse_pdf(pdf_bytes: bytes) -> dict:
     tt_buy_col = col_index("TT BUY")
     tt_sell_col = col_index("TT SELL")
 
-    if tt_buy_col < 0:
+    if table is None or tt_buy_col < 0:
         print(f"ERROR: 'TT BUY' column not found. Headers: {headers}", file=sys.stderr)
         sys.exit(2)
 
-    # Build currency → row lookup (match on CODE/INR in any cell)
+    # Build currency → row lookup (search rows AFTER the header row)
     def find_currency_row(code: str) -> list:
-        for row in table[1:]:
+        for row in table[header_row_idx + 1:]:
             if any(cell and f"{code}/INR" in str(cell) for cell in row):
                 return row
         return None
