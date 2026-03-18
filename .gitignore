@@ -1,0 +1,9 @@
+# Local scheduler output — never committed, avoids merge conflicts with CI
+local/
+__pycache__/
+
+# Utility/one-off scripts (not needed for the scraper to run)
+setup_windows_scheduler.ps1
+update_sbi_rates.py
+verify_2024_rates.py
+SBI-TT-Rate-CY2024-officialforexrates.csv

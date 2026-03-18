@@ -1,0 +1,61 @@
+# Fetch SBI TT Buying Rates 3x daily and commit to repo
+#
+# Schedule (IST = UTC+5:30):
+#   - 10:00 AM IST (04:30 UTC) — morning rate usually published by 9:30 AM
+#   - 03:00 PM IST (09:30 UTC) — afternoon update if rate changes
+#   - 08:00 PM IST (14:30 UTC) — evening catch-up / final rate of day
+#
+# SBI publishes the PDF at a well-known URL that gets overwritten each update.
+# Running 3x daily provides redundancy in case:
+#   a) SBI updates the rate intra-day
+#   b) One run fails (network, SBI site maintenance)
+#   c) GitHub Actions has a transient outage
+#
+# The script is idempotent — duplicate date+time combos are skipped.
+
+name: "Fetch SBI TT Rates"
+
+on:
+  schedule:
+    - cron: "30 4 * * *"   # 10:00 AM IST
+    - cron: "30 9 * * *"   # 03:00 PM IST
+    - cron: "30 14 * * *"  # 08:00 PM IST
+  workflow_dispatch:         # manual trigger for testing
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-rates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pdfplumber
+        run: pip install pdfplumber
+
+      - name: Fetch SBI rates
+        run: python fetch_sbi_rates.py --archive-pdf
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ci/
+          if git diff --cached --quiet; then
+            echo "No new rates to commit"
+          else
+            DATE=$(date -u +%Y-%m-%d)
+            git commit -m "chore: SBI TT rates update ${DATE}
+
+            Automated daily fetch from sbi.co.in/documents/16012/1400784/FOREX_CARD_RATES.pdf"
+            git push
+          fi
