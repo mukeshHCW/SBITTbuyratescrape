@@ -51,6 +51,7 @@ PDF_ARCHIVE_DIR = OUTPUT_DIR / "pdf-archive"
 
 CSV_HEADERS = [
     "fetch_utc",       # UTC timestamp of when we fetched
+    "fetch_local",     # Local machine time (IST or runner TZ)
     "pdf_date",        # Date printed on the PDF (DD-MM-YYYY)
     "pdf_time",        # Time printed on the PDF (e.g. "9:30 AM")
     "usd_tt_buy",      # USD/INR TT Buying Rate
@@ -177,14 +178,23 @@ def parse_pdf(pdf_bytes: bytes) -> dict:
 
 
 # ---------- CSV Append ----------
-def is_duplicate(csv_path: Path, pdf_date: str, pdf_time: str) -> bool:
-    """Check if this date+time combo already exists in the CSV."""
+def is_duplicate(csv_path: Path, data: dict) -> bool:
+    """Check if this exact date+time+rate combo already exists in the CSV.
+
+    Matches on pdf_date + pdf_time + usd_tt_buy. This way:
+    - Same date, same time, same rate → skip (true duplicate)
+    - Same date, different time → record (SBI updated intra-day)
+    - Same date, same time, different rate → record (SBI changed rate
+      without updating the timestamp)
+    """
     if not csv_path.exists():
         return False
     with open(csv_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row.get("pdf_date") == pdf_date and row.get("pdf_time") == pdf_time:
+            if (row.get("pdf_date") == data["pdf_date"]
+                    and row.get("pdf_time") == data["pdf_time"]
+                    and row.get("usd_tt_buy") == data["usd_tt_buy"]):
                 return True
     return False
 
@@ -235,7 +245,9 @@ def main():
 
     # Step 2: Parse
     data = parse_pdf(pdf_bytes)
-    fetch_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc)
+    fetch_utc = now.strftime("%Y-%m-%d %H:%M:%S")
+    fetch_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"  Date: {data['pdf_date']}  Time: {data['pdf_time']}")
     print(f"  USD/INR TT Buy: {data['usd_tt_buy']}")
     print(f"  USD/INR TT Sell: {data['usd_tt_sell']}")
@@ -246,13 +258,13 @@ def main():
         print("(dry run — not writing to CSV)")
         return
 
-    # Step 3: Dedup check
-    if is_duplicate(csv_path, data["pdf_date"], data["pdf_time"]):
-        print(f"  SKIP: {data['pdf_date']} {data['pdf_time']} already in CSV")
+    # Step 3: Dedup check (date + time + rate must all match to skip)
+    if is_duplicate(csv_path, data):
+        print(f"  SKIP: {data['pdf_date']} {data['pdf_time']} rate={data['usd_tt_buy']} already in CSV")
         return
 
     # Step 4: Append
-    row = {"fetch_utc": fetch_utc, **data}
+    row = {"fetch_utc": fetch_utc, "fetch_local": fetch_local, **data}
     append_csv(csv_path, row)
     print(f"  Appended to {csv_path}")
 
